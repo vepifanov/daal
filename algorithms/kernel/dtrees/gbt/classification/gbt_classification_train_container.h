@@ -28,6 +28,7 @@
 #include "gbt_classification_training_types.h"
 #include "gbt_classification_training_batch.h"
 #include "gbt_classification_train_kernel.h"
+#include "oneapi/gbt_classification_train_kernel_oneapi.h"
 #include "gbt_classification_model_impl.h"
 #include "service_algo_utils.h"
 
@@ -46,7 +47,17 @@ namespace interface2
 template <typename algorithmFPType, Method method, CpuType cpu>
 BatchContainer<algorithmFPType, method, cpu>::BatchContainer(daal::services::Environment::env * daalEnv)
 {
-    __DAAL_INITIALIZE_KERNELS(internal::ClassificationTrainBatchKernel, algorithmFPType, method);
+    auto& context = services::Environment::getInstance()->getDefaultExecutionContext();
+    auto& deviceInfo = context.getInfoDevice();
+
+    if (deviceInfo.isCpu)
+    {
+        __DAAL_INITIALIZE_KERNELS(internal::ClassificationTrainBatchKernel, algorithmFPType, method);
+    }
+    else
+    {
+        __DAAL_INITIALIZE_KERNELS_SYCL(internal::ClassificationTrainBatchKernelOneAPI, algorithmFPType, method);
+    }
 }
 
 template <typename algorithmFPType, Method method, CpuType cpu>
@@ -58,6 +69,9 @@ BatchContainer<algorithmFPType, method, cpu>::~BatchContainer()
 template <typename algorithmFPType, Method method, CpuType cpu>
 services::Status BatchContainer<algorithmFPType, method, cpu>::compute()
 {
+    auto& context = services::Environment::getInstance()->getDefaultExecutionContext();
+    auto& deviceInfo = context.getInfoDevice();
+
     classifier::training::Input * input = static_cast<classifier::training::Input *>(_in);
     Result * result                     = static_cast<Result *>(_res);
 
@@ -71,8 +85,17 @@ services::Status BatchContainer<algorithmFPType, method, cpu>::compute()
     daal::algorithms::engines::internal::BatchBaseImpl * engine =
         dynamic_cast<daal::algorithms::engines::internal::BatchBaseImpl *>(par->engine.get());
 
-    __DAAL_CALL_KERNEL(env, internal::ClassificationTrainBatchKernel, __DAAL_KERNEL_ARGUMENTS(algorithmFPType, method), compute,
-                       daal::services::internal::hostApp(*input), x, y, *m, *result, *par, *engine);
+    if (deviceInfo.isCpu)
+    {
+        __DAAL_CALL_KERNEL(env, internal::ClassificationTrainBatchKernel, __DAAL_KERNEL_ARGUMENTS(algorithmFPType, method), compute,
+                           daal::services::internal::hostApp(*input), x, y, *m, *result, *par, *engine);
+    }
+    else
+    {
+         __DAAL_CALL_KERNEL_SYCL(env, internal::ClassificationTrainBatchKernelOneAPI,
+                                 __DAAL_KERNEL_ARGUMENTS(algorithmFPType, method),
+                                 compute, daal::services::internal::hostApp(*input), x, y, *m, *result, *par, *engine);
+    }
 }
 
 template <typename algorithmFPType, Method method, CpuType cpu>
